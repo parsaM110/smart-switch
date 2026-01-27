@@ -1,7 +1,10 @@
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <ArduinoWebsockets.h>
-
+#include <ArduinoJson.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include "DHT.h"
 
 const char* websockets_server_host = "http://spadwebsocket.runflare.run/ws/chat/lobby_room/"; //Enter server adress
 
@@ -11,18 +14,18 @@ using namespace websockets;
 
 WiFiUDP Udp;
 
-#define BUTTON_PIN1 4  // ESP32 pin GIOP14, which connected to button
-#define BUTTON_PIN2 5  // ESP32 pin GIOP15, which connected to button
+#define BUTTON_PIN1 5  // ESP32 pin GIOP14, which connected to button
+#define BUTTON_PIN2 4  // ESP32 pin GIOP15, which connected to button
 
 #define LED_PIN1    14  // ESP32 pin GIOP14, which connected to led
 #define LED_PIN2    16  // ESP32 pin GIOP18, which connected to led
-#define LED_PIN3    12  // ESP32 pin GIOP22, which connected to led
-#define LED_PIN4    13  // ESP32 pin GIOP23, which connected to led
+#define LED_PIN3    13  // ESP32 pin GIOP22, which connected to led
+#define LED_PIN4    12  // ESP32 pin GIOP23, which connected to led
 
 
 // The below are variables, which can be changed
-int led_state1 = LOW;    // the current state of LED
-int led_state2 = LOW;    // the current state of LED
+int led_state1 = HIGH;    // the current state of LED
+int led_state2 = HIGH;    // the current state of LED
 int led_state3 = LOW;    // the current state of LED
 int led_state4 = LOW;    // the current state of LED
 
@@ -34,25 +37,40 @@ int last_button_state2;  // the previous state of button
 
 WebsocketsClient client;
 
+#define DHTPIN 2     // Digital pin connected to the DHT sensor
+
+#define DHTTYPE DHT11   // DHT 11
+
+
+DHT dht(DHTPIN, DHTTYPE);
+unsigned long previousMillis = 0;  //will store last time LED was blinked
+const long period = 2000; 
 void setup() {
 
  Serial.begin(115200);               // initialize serial
-  pinMode(BUTTON_PIN1, INPUT_PULLUP); // set ESP32 pin to input pull-up mode
+  pinMode(BUTTON_PIN1, INPUT); // set ESP32 pin to input pull-up mode
   pinMode(LED_PIN1, OUTPUT);          // set ESP32 pin to output mode
   pinMode(LED_PIN3, OUTPUT);          // set ESP32 pin to output mode
 
-  pinMode(BUTTON_PIN2, INPUT_PULLUP); // set ESP32 pin to input pull-up mode
+  pinMode(BUTTON_PIN2, INPUT); // set ESP32 pin to input pull-up mode
   pinMode(LED_PIN2, OUTPUT);          // set ESP32 pin to output mode
   pinMode(LED_PIN4, OUTPUT);          // set ESP32 pin to output mode
 
   button_state1 = digitalRead(BUTTON_PIN1);
   button_state2 = digitalRead(BUTTON_PIN2);
   
-
+    digitalWrite(LED_PIN1, HIGH);
+    digitalWrite(LED_PIN2, HIGH);
+    digitalWrite(LED_PIN3, LOW);
+    digitalWrite(LED_PIN4, LOW);
+   
 
  
   
   WiFi.mode(WIFI_STA);
+
+
+   dht.begin();
 
 
 
@@ -67,13 +85,21 @@ void setup() {
 }
 
 void loop() {
+
+  
+   // save the last time you blinked the LED
+   if(client.available()) {
+                      client.poll();
+                      client.send(dht.readHumidity());
+                   }
   
         esptouch();
          Udp.parsePacket();
-         if(client.available()) {
-                      client.poll();
-                      client.send("test");
-                   }
+        
+
+
+
+          
 
  
 
@@ -112,7 +138,7 @@ void esptouch(){
     
        WiFi.beginSmartConfig();
        
-           delay(1000);
+          
            if(WiFi.smartConfigDone()){
              Serial.println("SmartConfig Success");
              WiFi.printDiag(Serial);
@@ -122,6 +148,7 @@ void esptouch(){
              // Start the server
                  Udp.begin(49999);
                  websocketfunction();
+                
                  
              }
        }
@@ -138,9 +165,9 @@ void esptouch(){
     bool connected = client.connect(websockets_server_host);
     if(connected) {
         Serial.println("Connecetd!");
-        client.send("Hello Server");
+       client.send("Hello Server");
     } else {
-        Serial.println("Not Connected!");
+        //Serial.println("Not Connected!");
     }
     
     // run callback when messages are received
@@ -149,28 +176,75 @@ void esptouch(){
         Serial.println(message.data());
         if((message.data()== "{\"message\": \"1\"}") ){
            Serial.println("1");
-           digitalWrite(LED_PIN1, HIGH);
-           digitalWrite(LED_PIN3, LOW);
+           digitalWrite(LED_PIN1, LOW);
+           digitalWrite(LED_PIN3, HIGH);
       }
       if(message.data()=="{\"message\": \"2\"}"){
            Serial.println("2");
-           digitalWrite(LED_PIN1, LOW);
-           digitalWrite(LED_PIN3, HIGH);
+           digitalWrite(LED_PIN1, HIGH);
+           digitalWrite(LED_PIN3, LOW);
       } 
       if((message.data()=="{\"message\": \"3\"}") ){
            Serial.println("3");
-           digitalWrite(LED_PIN2, HIGH);
-           digitalWrite(LED_PIN4, LOW);
+           digitalWrite(LED_PIN2, LOW);
+           digitalWrite(LED_PIN4, HIGH);
       } 
       if(message.data()=="{\"message\": \"4\"}"){
            Serial.println("4");
-           digitalWrite(LED_PIN2, LOW);
-           digitalWrite(LED_PIN4, HIGH);
+           digitalWrite(LED_PIN2, HIGH);
+           digitalWrite(LED_PIN4, LOW);
       } 
     
     });
   
     }
+
+
+     void postDataToServer() {
+
+
+
+
+  
+ // if (isnan(h) || isnan(t) || isnan(f)) {
+   // Serial.println(F("Failed to read from DHT sensor!"));
+    //return;
+  //}
+
+    
+ 
+  Serial.println("Posting JSON data to server...");
+  // Block until we are able to connect to the WiFi access point
+  
+    WiFiClientSecure client;
+    HTTPClient http;   
+    client.setInsecure();
+    http.begin(client,"https://retoolapi.dev/0tvafA/data/1");  
+    http.addHeader("Content-Type", "application/json");         
+     
+    StaticJsonDocument<200> doc;
+    // Add values in the document
+    //
+    doc["temp1"] = dht.readHumidity();
+    doc["temp2"] = dht.readTemperature();
+   
+     
+    String requestBody;
+    serializeJson(doc, requestBody);
+     
+    int httpResponseCode = http.PUT(requestBody);
+ 
+    if(httpResponseCode>0){
+       
+      String response = http.getString();                       
+       
+      Serial.println(httpResponseCode);   
+      Serial.println(response);
+     
+   
+     
+  }
+}
 
 
 
