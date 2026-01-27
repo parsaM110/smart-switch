@@ -5,14 +5,25 @@
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include "DHT.h"
+#include <EEPROM.h>
 
 const char* websockets_server_host = "http://spadwebsocket.runflare.run/ws/chat/lobby_room/"; //Enter server adress
 
 
 using namespace websockets;
 
+unsigned long previousMillis = 0;  //will store last time LED was blinked
+const long period = 6000;
 
 WiFiUDP Udp;
+
+//--------------------------------------------
+#define WiFi_rst 0                  //WiFi credential reset pin (Flash button on ESP8266)
+unsigned long rst_millis;
+//--------------------------------------------
+String ssid;                        //string variable to store ssid
+String pss;                         //string variable to store password
+//-----------------------------------------
 
 #define BUTTON_PIN1 5  // ESP32 pin GIOP14, which connected to button
 #define BUTTON_PIN2 4  // ESP32 pin GIOP15, which connected to button
@@ -43,11 +54,19 @@ WebsocketsClient client;
 
 
 DHT dht(DHTPIN, DHTTYPE);
-unsigned long previousMillis = 0;  //will store last time LED was blinked
-const long period = 2000; 
+ 
 void setup() {
 
  Serial.begin(115200);               // initialize serial
+
+  //-----------------------------------------
+  pinMode(WiFi_rst, INPUT_PULLUP);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
+  EEPROM.begin(200);
+ 
+//-----------------------------------------
+
   pinMode(BUTTON_PIN1, INPUT); // set ESP32 pin to input pull-up mode
   pinMode(LED_PIN1, OUTPUT);          // set ESP32 pin to output mode
   pinMode(LED_PIN3, OUTPUT);          // set ESP32 pin to output mode
@@ -63,14 +82,81 @@ void setup() {
     digitalWrite(LED_PIN2, HIGH);
     digitalWrite(LED_PIN3, LOW);
     digitalWrite(LED_PIN4, LOW);
-   
-
- 
   
-  WiFi.mode(WIFI_STA);
 
 
    dht.begin();
+
+
+
+   Serial.println("Reading EEPROM ssid");
+ 
+    
+    for (int i = 0; i < 32; ++i)
+    {
+      ssid += char(EEPROM.read(i));
+    }
+    Serial.print("SSID = ");
+    Serial.println(ssid);
+    Serial.println("Reading EEPROM pass");
+ 
+    for (int i = 32; i < 96; ++i)
+    {
+      pss += char(EEPROM.read(i));
+    }
+    Serial.print("pass = ");
+    Serial.println(pss);
+  
+//-----------------------------------------
+  
+    WiFi.begin(ssid.c_str(), pss.c_str());
+
+    delay(5000);
+
+
+    //-----------------------------------------
+
+  if (WiFi.status() != WL_CONNECTED) // if WiFi is not connected
+  {
+  
+    WiFi.mode(WIFI_STA);
+    WiFi.beginSmartConfig();
+//------------------------------------------
+  Serial.println("waiting for smartConfig");
+  while(!WiFi.smartConfigDone()) {
+    delay(500);
+    Serial.print(".");
+  }
+//------------------------------------------
+   Serial.println("");
+   Serial.println("SmartConfig Successsssss");
+  
+
+    //WiFi.printDiag(Serial);
+  ssid = WiFi.SSID();
+  pss = WiFi.psk();
+  Serial.print("SSID:");
+  Serial.println(ssid);
+  Serial.print("PSS:");
+  Serial.println(pss);
+  Serial.println("writing eeprom ssid:");
+        for (int i = 0; i < ssid.length(); ++i)
+        {
+          EEPROM.write(i, ssid[i]);
+          Serial.print("Wrote: ");
+          Serial.println(ssid[i]);
+        }
+        EEPROM.write( ssid.length(), '\0');
+        Serial.println("writing eeprom pass:");
+        for (int i = 0; i < pss.length(); ++i)
+        {
+          EEPROM.write(32 + i, pss[i]);
+          Serial.print("Wrote: ");
+          Serial.println(pss[i]);
+        }
+        EEPROM.write(32 + pss.length(), '\0');
+        EEPROM.commit();
+ 
 
 
 
@@ -89,12 +175,39 @@ void loop() {
   
    // save the last time you blinked the LED
    if(client.available()) {
+                   int humid = dht.readHumidity(); 
+                   int temp = dht.readTemperature();
+                   unsigned long currentMillis = millis(); // store the current time
+                    if (currentMillis - previousMillis >= period) { // check if 1000ms passed
+                     previousMillis = currentMillis;
+                     client.send("temp :" + String(temp));
+                     client.send("humid :" + String(humid));
+                    }   
+                     
+
                       client.poll();
-                      client.send(dht.readHumidity());
                    }
   
-        esptouch();
+         esptouch();
          Udp.parsePacket();
+
+
+
+  rst_millis = millis();
+  while (digitalRead(WiFi_rst) == LOW){
+  
+   }
+  // check the button press time if it is greater than 3sec clear wifi cred and restart ESP 
+  if (millis() - rst_millis >= 3000){
+  digitalWrite(LED_BUILTIN, LOW);
+  for (int i = 0; i < 96; ++i)
+        {
+          EEPROM.write(i, 0);
+        }
+  EEPROM.commit();
+  delay(5000);
+  ESP.restart();
+  }
         
 
 
@@ -103,7 +216,7 @@ void loop() {
 
  
 
-       last_button_state1 = button_state1;      // save the last state
+  last_button_state1 = button_state1;      // save the last state
   button_state1 = digitalRead(BUTTON_PIN1); // read new state
 
   last_button_state2 = button_state2;      // save the last state
@@ -118,6 +231,16 @@ void loop() {
     // control LED arccoding to the toggled state
     digitalWrite(LED_PIN1, led_state1);
     digitalWrite(LED_PIN3, led_state3);
+
+
+      if(led_state1 == HIGH){
+      client.send("1");
+    }
+    else{
+      client.send("2");
+      }
+
+    
   }
   if (last_button_state2 == HIGH && button_state2 == LOW) {
     Serial.println("The button2 is pressed");
@@ -129,8 +252,16 @@ void loop() {
     // control LED arccoding to the toggled state
     digitalWrite(LED_PIN2, led_state2);
     digitalWrite(LED_PIN4, led_state4);
+
+    if(led_state2 == HIGH){
+      client.send("3");
+    }
+    else{
+      client.send("4");
+      }
+    }
   }
-}
+
 
 void esptouch(){
 
@@ -178,6 +309,7 @@ void esptouch(){
            Serial.println("1");
            digitalWrite(LED_PIN1, LOW);
            digitalWrite(LED_PIN3, HIGH);
+           
       }
       if(message.data()=="{\"message\": \"2\"}"){
            Serial.println("2");
@@ -200,52 +332,4 @@ void esptouch(){
     }
 
 
-     void postDataToServer() {
-
-
-
-
-  
- // if (isnan(h) || isnan(t) || isnan(f)) {
-   // Serial.println(F("Failed to read from DHT sensor!"));
-    //return;
-  //}
-
     
- 
-  Serial.println("Posting JSON data to server...");
-  // Block until we are able to connect to the WiFi access point
-  
-    WiFiClientSecure client;
-    HTTPClient http;   
-    client.setInsecure();
-    http.begin(client,"https://retoolapi.dev/0tvafA/data/1");  
-    http.addHeader("Content-Type", "application/json");         
-     
-    StaticJsonDocument<200> doc;
-    // Add values in the document
-    //
-    doc["temp1"] = dht.readHumidity();
-    doc["temp2"] = dht.readTemperature();
-   
-     
-    String requestBody;
-    serializeJson(doc, requestBody);
-     
-    int httpResponseCode = http.PUT(requestBody);
- 
-    if(httpResponseCode>0){
-       
-      String response = http.getString();                       
-       
-      Serial.println(httpResponseCode);   
-      Serial.println(response);
-     
-   
-     
-  }
-}
-
-
-
-  
