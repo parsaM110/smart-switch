@@ -7,13 +7,16 @@
 #include "DHT.h"
 #include <EEPROM.h>
 
-
+unsigned long previous_time = 0;
 const char* websockets_server_host = "http://spadwebsocket.runflare.run/ws/chat/lobby_room/"; //Enter server adress
+int remain_time=0; // for timer mode
+int active_time=0 ; // for timer mode
 
 
 using namespace websockets;
 
 unsigned long previousMillis = 0;
+unsigned long  delayy=20000;
 unsigned long previousMillis1 = 0;  //will store last time LED was blinked
 int previousState = 0;
 unsigned long rst_millis ;
@@ -53,6 +56,19 @@ WebsocketsClient client;
 
 
 DHT dht(DHTPIN, DHTTYPE);
+
+
+   // Function of connect to wifi
+   
+     void initWiFi() {
+     WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, pss);
+    delay(100);
+     Serial.print("Connecting to WIFI network");
+  
+       Serial.println(WiFi.localIP());
+ }
+ 
  
 void setup() {
 
@@ -63,8 +79,9 @@ void setup() {
   
   EEPROM.begin(200);
  
-//-----------------------------------------
 
+ //------------
+ 
   pinMode(BUTTON_PIN1, INPUT); // set ESP32 pin to input pull-up mode
   pinMode(LED_PIN1, OUTPUT);          // set ESP32 pin to output mode
   pinMode(LED_PIN3, OUTPUT);          // set ESP32 pin to output mode
@@ -111,49 +128,98 @@ void setup() {
     Serial.println(pss);
   
 //-----------------------------------------
-    
-    WiFi.begin(ssid.c_str(), pss.c_str());
-    WiFi.setAutoReconnect(true);
-    WiFi.persistent(true);
-
-
-WiFi.mode(WIFI_STA);
-
-   
-
-    
-
-
-    //-----------------------------------------
-
-    
-
- 
 
 
 
-
-
-
-
-  
-  
+//-----------------------------------------
+  initWiFi();
+     delay(5000);
  
 }
 
 void loop() {
+     unsigned long currentMillis = millis();
+    
+     if(WiFi.status() != WL_CONNECTED   ) {
+         
+           esptouch();
+         Udp.parsePacket();
+       }
 
-  
+
+       if(remain_time != 0){
+        oldtime = millis();
+        if((millis()-oldtime) > remain_time){
+
+          digitalWrite(LED_PIN1, LOW);
+          digitalWrite(LED_PIN3, HIGH);
+          digitalWrite(LED_PIN2, LOW);
+          digitalWrite(LED_PIN4, HIGH);
+          
+          }
+        }
+
+
+       if(active_time !=0 ){
+        oldtime2 = millis();
+        if((millis()-oldtime2) > active_time){
+
+          digitalWrite(LED_PIN1, HIGH);
+          digitalWrite(LED_PIN3, LOW);
+          digitalWrite(LED_PIN2, HIGH);
+          digitalWrite(LED_PIN4, LOW);
+          
+          }
+        }
+        
+       
+
+
+       
+      if(WiFi.status() == WL_CONNECTED){
+         if (currentMillis - previousMillis >= period){
+        Serial.println("Wifi is Connect");
+        }
+       }
+       
+
+   unsigned long current_time = millis(); // number of milliseconds since the upload
+       if(EEPROM.read(100)==5 ){
+      if (WiFi.status() != WL_CONNECTED){
+       if(current_time - previous_time >= 10000){
+              previous_time = current_time;
+               Serial.println(previous_time);
+              Serial.println("Hassan");
+              Serial.println(EEPROM.read(100));
+                  WiFi.disconnect();
+                    initWiFi();
+      
+       }
+       }
+     }
+     
+ //Run the server
+ 
+ int clientt=client.available();
+ if(WiFi.status() == WL_CONNECTED){
+if(clientt != 1){
+    Udp.begin(49999);
+    websocketfunction();
+}
+ }
+ 
    // save the last time you blinked the LED
-                  unsigned long currentMillis = millis();
-                 if(client.available()) {
-                
-                   float humid = dht.readHumidity(); 
-                   float temp = dht.readTemperature();
+                  
+                // if(client.available()) {
+                if(WiFi.status() == WL_CONNECTED){
+                  // float humid = dht.readHumidity(); 
+                  // float temp = dht.readTemperature();
                     // store the current time
-                    if (currentMillis - previousMillis >= period) { // check if 1000ms passed
+                    if (currentMillis - previousMillis >= period) {
+                      float humid = dht.readHumidity(); 
+                   float temp = dht.readTemperature();// check if 1000ms passed
                      previousMillis = currentMillis;
-                     
+                      Serial.println(clientt);
                      client.send("temp :" + String(temp));
                      client.send("humid :" + String(humid));
                     }   
@@ -161,9 +227,11 @@ void loop() {
 
                       client.poll();
                    }
+
+
+
   
-        esptouch();
-         Udp.parsePacket();
+        
 
         
        
@@ -174,12 +242,12 @@ void loop() {
        
            
        if ( digitalRead(4)== LOW ) {
-            if (currentMillis - previousMillis1 >= 9000){
+            if (currentMillis - previousMillis1 >= 5000){
          
           
-  for (int i = 0; i < 96; ++i)
+  for (int i = 0; i < 101; ++i)
         {
-          EEPROM.write(i, 0);
+          EEPROM.write(i,0 );
         }
   EEPROM.commit();
 
@@ -237,12 +305,20 @@ void loop() {
       client.send("4");
       }
     }
+
+    // timer
+    
+  
+    
+
+    
+    
   }
 
 
-void esptouch(){
+      void esptouch()  {
 
-     if(WiFi.status() != WL_CONNECTED) {
+     
     
        WiFi.beginSmartConfig();
        
@@ -251,7 +327,7 @@ void esptouch(){
              Serial.println("SmartConfig Success");
              WiFi.printDiag(Serial);
              
-       
+        
   
              // Start the server
                  Udp.begin(49999);
@@ -260,11 +336,11 @@ void esptouch(){
 
 
                   //WiFi.printDiag(Serial);
-  ssid = WiFi.SSID();
-  pss = WiFi.psk();
-  Serial.print("SSID:");
-  Serial.println(ssid);
-  Serial.print("PSS:");
+    ssid = WiFi.SSID();
+    pss = WiFi.psk();
+     Serial.print("SSID:");
+     Serial.println(ssid);
+      Serial.print("PSS:");
   Serial.println(pss);
   Serial.println("writing eeprom ssid:");
         for (int i = 0; i < ssid.length(); ++i)
@@ -283,12 +359,11 @@ void esptouch(){
         }
         EEPROM.write(32 + pss.length(), '\0');
         EEPROM.commit();
-                
+          EEPROM.write(100, 5);       
                  
              }
-       }
-       
-  }
+           
+     }
 
 
 
@@ -296,7 +371,9 @@ void esptouch(){
 
 
 
-  void websocketfunction(){
+     void  websocketfunction()  {
+    
+  
     bool connected = client.connect(websockets_server_host);
     if(connected) {
         Serial.println("Connecetd!");
@@ -329,6 +406,16 @@ void esptouch(){
            Serial.println("4");
            digitalWrite(LED_PIN2, HIGH);
            digitalWrite(LED_PIN4, LOW);
+      } 
+      if(message.data().startsWith("{\"message\": \"Timer\"}")){
+           Serial.println("timer arrived");
+           Serial.println("timer arrived");
+           int comaPosition = message.data().indexOf(',');
+           int colonPosition = message.data().indexOf(':');
+           remain_time = message.data().substring(colonPosition,comaPosition).toInt();
+           Serial.println(remain_time);
+           active_time = message.data().substring(comaPosition).toInt();
+           Serial.println(active_time);
       } 
     
     });
